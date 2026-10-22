@@ -1,0 +1,6 @@
+[submodule "src/asu"]
+	path = src/asu
+	url = https://github.com/openwrt/asu.git
+[submodule "src/firmware-selector"]
+	path = src/firmware-selector
+	url = https://github.com/openwrt/firmware-selector-openwrt-org.git

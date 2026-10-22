@@ -1,0 +1,29 @@
+# ASU Server Configuration
+# https://github.com/openwrt/asu
+
+upstream_url = "https://downloads.openwrt.org"
+allow_defaults = false
+log_level = "INFO"
+
+# Container settings
+base_container = "ghcr.io/openwrt/imagebuilder"
+
+# Caching proxy: route build container package downloads through nginx cache
+cache_url = "http://cache"
+
+# Build cache TTLs
+build_ttl = "7d"
+build_ttl_unversioned = "24h"
+build_defaults_ttl = "30m"
+build_failure_ttl = "1h"
+max_pending_jobs = 200
+job_timeout = "30m"
+
+# Allowed external repository URL prefixes
+repository_allow_list = [
+    "https://nikkinikki.pages.dev/",
+    "https://packages.routerich.ru/",
+]
+
+# Rootfs size limit (matches official sysupgrade server 1 GiB)
+max_custom_rootfs_size_mb = 1024

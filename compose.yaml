@@ -1,0 +1,98 @@
+services:
+  podman:
+    image: quay.io/podman/stable:latest
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - podman-run:/run/podman:rw
+      - podman-storage:/var/lib/containers:rw
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        rm -f /run/podman/podman.sock
+        sed -i 's/mountopt = "nodev,fsync=0"/mountopt = "nodev"/' /etc/containers/storage.conf
+        sed -i 's|^mount_program = .*|# mount_program = ""|' /etc/containers/storage.conf
+        grep -q '172.17.0.1 cache' /etc/hosts || echo '172.17.0.1 cache' >> /etc/hosts
+        grep -q 'base_hosts_file' /etc/containers/containers.conf || echo 'base_hosts_file = "/etc/hosts"' >> /etc/containers/containers.conf
+        podman network exists asu-build || podman network create --disable-dns asu-build
+        exec podman system service --time=0 unix:///run/podman/podman.sock
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /run/podman/podman.sock"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+      start_period: 2s
+
+  cache:
+    image: "docker.io/library/nginx:alpine"
+    restart: unless-stopped
+    volumes:
+      - ./config/nginx-cache.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./data/cache:/var/cache/nginx:rw
+    ports:
+      - "${CACHE_PORT:-80}:80"
+
+  redis:
+    image: "docker.io/redis/redis-stack-server"
+    restart: unless-stopped
+    volumes:
+      - ./data/redis:/data/:rw
+
+  server:
+    image: ${ASU_IMAGE:-asu:latest}
+    build:
+      context: ./src/asu
+      dockerfile: Containerfile
+    restart: unless-stopped
+    command: uv run uvicorn --host 0.0.0.0 --reload --reload-include asu.toml asu.main:app
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+    volumes:
+      - ./config/asu.toml:/app/asu.toml:ro
+      - ./config/sitecustomize.py:/app/sitecustomize.py:ro
+      - ./data/store:/public/store:ro
+    depends_on:
+      - redis
+
+  worker:
+    image: ${ASU_IMAGE:-asu:latest}
+    build:
+      context: ./src/asu
+      dockerfile: Containerfile
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        ln -sf /run/podman/podman.sock /var/podman.sock
+        ln -sf /run/podman/podman.sock /app/podman.sock
+        exec uv run rqworker --logging_level INFO
+    environment:
+      REDIS_URL: "redis://redis:6379/0"
+    volumes:
+      - ./config/asu.toml:/app/asu.toml:ro
+      - ./config/sitecustomize.py:/app/sitecustomize.py:ro
+      - ./data/store:/public/store:rw
+      - podman-run:/run/podman:rw
+    depends_on:
+      redis:
+        condition: service_started
+      podman:
+        condition: service_healthy
+
+  frontend:
+    image: "docker.io/library/nginx:alpine"
+    restart: unless-stopped
+    volumes:
+      - ./config/nginx-frontend.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./src/firmware-selector/www:/usr/share/nginx/html:ro
+      - ./config/firmware-selector-config.js:/usr/share/nginx/html/config.js:ro
+    ports:
+      - "${FRONTEND_PORT:-8088}:80"
+    depends_on:
+      - server
+
+volumes:
+  podman-run:
+  podman-storage:
